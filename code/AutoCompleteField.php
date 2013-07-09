@@ -16,15 +16,40 @@ class AutoCompleteField extends TextField {
 	 * Name of the field to use as a filter for searches and results
 	 * @var string
 	 */
-	private $sourceField;
+	private $sourceField = array();
 
 	/**
 	 * Constant SQL condition used to filter out search results
 	 * @var string 
 	 */
 	private $sourceFilter;
+        
+        /**
+         * Array of filter classes for source fields
+         * @var array
+         */
+        private $sourceFilterClasses = array();
+        
+        /**
+         * Template for rendering the output for the value
+         * @var string|array|SSViewer
+         * @see ViewableData->renderWith()
+         */
+        private $valueTemplate;
+        
+        /**
+         * Does the current autocomplete has relations?
+         * @var array
+         */
+        private $hasRelation = array();
 
-	/**
+        /**
+         * Is the autocomplete dependent to another form field?
+         * @var string
+         */
+        private $filterField;
+        
+        /**
 	 * The url to use as the live search source
 	 * @var string
 	 */
@@ -71,14 +96,22 @@ class AutoCompleteField extends TextField {
 	}
 
 	function getAttributes() {
-		return array_merge(
-			parent::getAttributes(), array(
+                $attributes = array(
 				'data-source' => $this->getSuggestURL(),
 				'data-min-length' => $this->getMinSearchLength(),
 				'data-require-selection' => $this->getRequireSelection(),
 				'autocomplete' => 'off'
-			)
-		);
+			);
+                if ($this->filterField) {
+                    list($filter, $filterAs) = explode(':', $this->filterField);
+                        
+                    $attributes['data-filter-field'] = $filter;
+                    if ($filterAs) {
+                        $attributes['data-filter-field-as'] = $filterAs;
+                    }
+                    
+                } 
+		return array_merge(parent::getAttributes(), $attributes);
 	}
 
 	function Type() {
@@ -119,10 +152,18 @@ class AutoCompleteField extends TextField {
 	/**
 	 * Set the field from which to get Autocomplete suggestions.
 	 * 
-	 * @param string $fieldName The name of the source field.
+	 * @param string $field Name The name of the source field.
+         * @param string $filter filter class, e.g. PartialMatch
 	 */
-	public function setSourceField(string $fieldName) {
-		$this->sourceField = $fieldName;
+	public function setSourceField(string $fieldName, string $filter = null) {
+		$this->sourceField[$fieldName] = $fieldName;
+                $this->sourceFilterClasses[$fieldName] = $filter ? $filter : 'PartialMatch';
+                
+                if (strpos($fieldName, '.')) {
+                    $parts = explode('.',$fieldName);
+                    $this->hasRelation[] = $parts[0];
+                }
+                
 	}
 
 	/**
@@ -153,7 +194,19 @@ class AutoCompleteField extends TextField {
 	public function getSourceFilter() {
 		return $this->sourceFilter;
 	}
-
+        
+	/**
+	 * Set a Form Field as filter to get Autocomplete suggestions.
+	 * 
+	 * @param string|array $filter the filter field.
+	 */
+	public function setFilterField($filter, $filterAs = null) {
+		$this->filterField =  $filter . ':' . $filterAs;
+	}      
+        
+	public function setValueTemplate($template) {
+		$this->valueTemplate = $template;
+	}
 	/**
 	 * Set the URL used to fetch Autocomplete suggestions.
 	 * 
@@ -230,29 +283,68 @@ class AutoCompleteField extends TextField {
 			return;
 
 		// Find field to search within
-		$sourceField = $this->getSourceField();
-
+		$sourceFields = $this->getSourceField();
 		// input
 		$q = Convert::raw2sql($request->getVar('term'));
 		$limit = $this->getLimit();
+                
+                $sourceFieldFilter = array();
+                foreach ($sourceFields as $field) {
+                    $key = $field . ':' . $this->sourceFilterClasses[$field];
+                    $sourceFieldFilter[$key] = $q;
+                }
+                
+                $firstSourceField = reset($sourceFields);
 
 		// Generate query
 		$query = DataList::create($sourceClass)
-				->where("\"{$sourceField}\" LIKE '%{$q}%'")
-				->sort($sourceField)
+//				->where("\"{$sourceField}\" LIKE '%{$q}%'")
+                                ->filterAny($sourceFieldFilter)
+                                ->setQueriedColumns(array('ID','Code'))
+				->sort($firstSourceField)
 				->limit($limit);
 		if (isset($this->sourceFilter))
-			$query->where($this->sourceFilter);
+			$query = $query->where($this->sourceFilter);
+                
+                if ($filters = $request->getVar('filter')) {
+                    foreach ($filters as $key => $val) {
+                        $query = $query->filter(array(Convert::raw2sql($key) => Convert::raw2sql($val)));
+                    }
+                }
 
 		// generate items from result
 		$items = array();
-		foreach ($query as $item) {
-			$value = $item->$sourceField;
-			if (!in_array($value, $items)) {
-				$items[] = $value;
-			}
-		}
+                
+                
+                /**
+                 * for now only one relation
+                 */
+                $relationName = count($this->hasRelation)
+                        ? $this->hasRelation[0]
+                        : false;
 
+                
+		foreach ($query as $item) {
+                        if ($relationName) {
+                            foreach ($item->$relationName() as $relationItem) {
+                            $value = $this->valueTemplate
+                                    ? $relationItem->customise(array($sourceClass => $item))->renderWith($this->valueTemplate)
+                                    : $relationItem->$firstSourceField;
+                            if (!in_array($value, $items) &&  stristr($value, $q)) {
+                                    $items[] = $value;
+                            }                                
+                            }
+                        } else {
+                            $value = $this->valueTemplate
+                                    ? $item->renderWith($this->valueTemplate)
+                                    : $item->$firstSourceField;
+                            if (!in_array($value, $items) && stristr($value, $q)) {
+                                    $items[] = $value;
+                            }
+                        }
+                        
+		}
+                
 		// the response body
 		return json_encode($items);
 	}

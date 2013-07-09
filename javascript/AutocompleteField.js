@@ -15,10 +15,25 @@
 			if(input.attr('data-loaded') == 'true')
 				return;
 			input.attr('data-loaded', 'true');
+                        
+                        var source = input.attr('data-source');
+                        var filterField = '';
+                        var filterFieldAs = '';
+                        
+                        
+                        if (input.attr('data-filter-field')) {
+                            filterField = input.attr('data-filter-field');
+                            filterFieldAs = input.attr('data-filter-field-as')
+                                ? input.attr('data-filter-field-as')
+                                : filterField;
+                            
+                        var value = $('[name=' + filterField + ']').filter(":input").val();
+                            source = source + '?filter[' + filterFieldAs + ']=' + value;
+                        }
             
 			// load autocomplete into this field
 			input.autocomplete({
-				source: input.attr('data-source'),
+				source: source,
 				minLength: input.attr('data-min-length'),
 				change: function( event, ui ) {
 					
