@@ -7,7 +7,7 @@
 	$(function() {
 
 		// Load autocomplete functionality when field gets focused
-		$('.field.autocomplete input.text').live('focus', function() {
+		$('.field.autocomplete input.text').on('focus', function() {
 			
 			var input = $(this);
             
@@ -17,18 +17,26 @@
 			input.attr('data-loaded', 'true');
                         
                         var source = input.attr('data-source');
+                        var filterFieldName = ''
                         var filterField = '';
                         var filterFieldAs = '';
                         
                         
                         if (input.attr('data-filter-field')) {
-                            filterField = input.attr('data-filter-field');
+                            filterFieldName = input.attr('data-filter-field');
                             filterFieldAs = input.attr('data-filter-field-as')
                                 ? input.attr('data-filter-field-as')
-                                : filterField;
+                                : filterFieldName;
                             
-                        var value = $('[name=' + filterField + ']').filter(":input").val();
-                            source = source + '?filter[' + filterFieldAs + ']=' + value;
+                            filterField = $('[name=' + filterFieldName + ']').filter(":input")
+                            var sourceStub = input.attr('data-source')+ '?filter[' + filterFieldAs + ']=';
+                            
+                            filterField.on('change', {input: input, src: sourceStub}, function(event) {
+                                event.data.input.autocomplete("option", "source", event.data.src + $(this).val());
+                            });
+                            
+                            source = sourceStub + filterField.val();
+                        
                         }
             
 			// load autocomplete into this field
